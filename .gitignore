@@ -1,0 +1,5 @@
+# Generated on each run; the workflow publishes these without committing them.
+site/guardian_feeds.csv
+site/articles.json
+site/status.json
+__pycache__/
