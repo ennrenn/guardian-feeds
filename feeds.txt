@@ -1,6 +1,7 @@
 # One feed URL per line. Blank lines and lines starting with # are ignored.
-# Replace the example below with your full list of Guardian feeds.
-https://www.fenews.co.uk/feed
+# Any ordinary RSS feed works, from the Guardian or from other sites.
+
+# The Guardian
 https://www.theguardian.com/australia-news/australian-education/rss
 https://www.theguardian.com/education/academicexperts/rss
 https://www.theguardian.com/education/academics/rss
@@ -105,3 +106,21 @@ https://www.theguardian.com/politics/wes-streeting/rss
 https://www.theguardian.com/politics/yvette-cooper/rss
 https://www.theguardian.com/politics/zack-polanski/rss
 https://www.theguardian.com/us-news/us-politics/rss
+
+# FE News
+https://www.fenews.co.uk/feed
+
+# Daily Express
+https://www.express.co.uk/posts/rss/1/uk
+https://www.express.co.uk/posts/rss/139/politics
+https://www.express.co.uk/posts/rss/21/finance
+https://www.express.co.uk/posts/rss/22/citybusiness
+https://www.express.co.uk/posts/rss/59/tech
+
+# The Telegraph
+https://www.telegraph.co.uk/politics/rss.xml
+https://www.telegraph.co.uk/education/rss.xml
+https://www.telegraph.co.uk/science/rss.xml
+https://www.telegraph.co.uk/technology/rss.xml
+https://www.telegraph.co.uk/business/rss.xml
+https://www.telegraph.co.uk/news/rss.xml
