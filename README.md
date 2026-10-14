@@ -24,7 +24,7 @@ The Guardian sometimes answers "HTTP 429", which means too many requests. The sc
 
 ## Adding a feed from another site
 
-Add its URL to `feeds.txt` on a new line and run the workflow again. Any standard RSS feed works. The script reads the usual fields (title, link, date, author, categories, summary and image), copes with the different ways sites present them, and removes the stock endings some sites add to every summary, such as "Continue reading..." or "was published on FE News by...". The `source` column shows which site each article came from, and the site's page has a filter box that searches it.
+Add its URL to `feeds.txt` on a new line and run the workflow again. Any standard RSS feed works. The script reads the usual fields (title, link, date, author, categories, summary and image), copes with the different ways sites present them, and removes the stock endings some sites add to every summary, such as "Continue reading..." or "was published on FE News by...". It also copes with some site habits: the Express's separate author tag and keyword tags (the keywords are added to `categories`), and the Telegraph's internal tags, which are dropped (`structure:` and `storytype:`) or turned into plain words (`topics:things/uk-economy` becomes `uk economy`). The `source` column shows which site each article came from, and the site's page has a filter box that searches it.
 
 A site you add might need a small tweak if its summaries are laid out unusually. If a feed fails or looks wrong, the status panel on the page names it and gives the reason.
 
@@ -38,7 +38,7 @@ Near the top of `scripts/fetch_feeds.py` there are two settings. `MAX_AGE_DAYS =
 
 There is one row per article. The same article often appears in several feeds, so it is merged into one row, with `source_feeds` listing every feed it appeared in and `feed_count` giving the number. The columns are title, link, source (the website, such as theguardian.com or fenews.co.uk), published (UTC), author, categories, description (plain text), image_url, source_feeds, feed_count and guid. Rows are sorted newest first. The file is saved so Excel shows accents and symbols correctly.
 
-Each feed only holds its most recent items (about 20 for the Guardian, 50 for FE News), so every run gives a snapshot of what is in the feeds at that moment. It does not build up a history. For busy feeds that is a few days, so an article from early in the month may already be gone from the feed by the time you run it. The date filter only removes articles; it cannot bring back ones a feed has dropped.
+Each feed only holds its most recent items (about 20 for the Guardian, 50 for FE News, 10 for the Express and 120 for the Telegraph, going by the samples), so every run gives a snapshot of what is in the feeds at that moment. It does not build up a history. For busy feeds that is a few days, so an article from early in the month may already be gone from the feed by the time you run it. The date filter only removes articles; it cannot bring back ones a feed has dropped.
 
 ## Things to know
 
