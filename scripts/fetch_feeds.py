@@ -39,7 +39,7 @@ NS = {
 }
 
 COLUMNS = [
-    "title", "link", "published", "author", "categories", "description",
+    "title", "link", "source", "published", "author", "categories", "description",
     "image_url", "source_feeds", "feed_count", "guid",
 ]
 
@@ -111,8 +111,19 @@ def child_text(element, tag):
     return (found.text or "").strip() if found is not None else ""
 
 
-def best_image(item):
-    """Pick the widest media:content or media:thumbnail image, else an enclosure."""
+def tidy_description(raw_html):
+    """Turn a summary into plain text, minus the stock endings sites add to every one."""
+    # FE News: a last paragraph reading "<title> was published on FE News by <author>".
+    raw_html = re.sub(r"<p>(?:(?!</p>).)*? was published on (?:(?!</p>).)*</p>\s*$", "", raw_html, flags=re.S)
+    text = clean(raw_html)
+    text = re.sub(r"\s*Continue reading\.\.\.$", "", text)                                   # the Guardian
+    text = re.sub(r"\s*The post .*? appeared first on [^.]*\.?\s*$", "", text, flags=re.S)  # many WordPress sites
+    return text.strip()
+
+
+def best_image(item, summary_html=""):
+    """Pick the widest media:content or media:thumbnail image, else an enclosure,
+    else the first picture inside the summary (WordPress sites put it there)."""
     best_url, best_width = "", -1
     for node in item.findall("media:content", NS) + item.findall("media:thumbnail", NS):
         url = node.get("url", "")
@@ -126,6 +137,10 @@ def best_image(item):
         enclosure = item.find("enclosure")
         if enclosure is not None:
             best_url = enclosure.get("url", "")
+    if not best_url:
+        found = re.search(r"""<img\b[^>]*?\ssrc=["']([^"']+)["']""", summary_html)
+        if found:
+            best_url = html.unescape(found.group(1))
     return best_url
 
 
@@ -148,9 +163,8 @@ def parse_feed(data):
             "published": to_iso(child_text(node, "pubDate")) or to_iso(child_text(node, "dc:date")),
             "author": "; ".join(e.text.strip() for e in node.findall("dc:creator", NS) if e.text),
             "categories": [e.text.strip() for e in node.findall("category") if e.text],
-            # The Guardian ends every summary with a "Continue reading..." link; drop it.
-            "description": re.sub(r"\s*Continue reading\.\.\.$", "", clean(child_text(node, "description"))),
-            "image_url": best_image(node),
+            "description": tidy_description(child_text(node, "description")),
+            "image_url": best_image(node, child_text(node, "description")),
         })
     return clean(child_text(channel, "title")), items
 
@@ -166,14 +180,25 @@ def process(url):
     return {"url": url, "title": title, "items": items, "error": ""}
 
 
+def host_of(url):
+    """Website name without 'www.', e.g. 'fenews.co.uk'."""
+    host = urlparse(url).netloc.lower()
+    return host[4:] if host.startswith("www.") else host
+
+
 def feed_name(url):
-    """Short label for a feed, e.g. 'education/higher-education'."""
+    """Short label for a feed. Guardian feeds show just the path, e.g.
+    'education/higher-education'; other sites show the domain first, e.g. 'fenews.co.uk'."""
     path = urlparse(url).path.strip("/")
-    if path.endswith("/rss"):
-        path = path[:-4]
-    elif path == "rss":
+    for tail in ("/rss", "/feed"):
+        if path.endswith(tail):
+            path = path[: -len(tail)]
+    if path in ("rss", "feed"):
         path = ""
-    return path or url
+    host = host_of(url)
+    if not host or host == "theguardian.com":
+        return path or url
+    return f"{host}/{path}" if path else host
 
 
 def merge(results):
@@ -184,12 +209,15 @@ def merge(results):
         if result["error"]:
             continue
         name = feed_name(result["url"])
+        source = host_of(result["url"])
         for item in result["items"]:
             total += 1
-            row = seen.get(item["guid"])
+            key = item["link"] or item["guid"]  # the link is the same wherever the article appears
+            row = seen.get(key)
             if row is None:
-                row = {**item, "categories": list(dict.fromkeys(item["categories"])), "feeds": [name]}
-                seen[item["guid"]] = row
+                row = {**item, "source": source,
+                       "categories": list(dict.fromkeys(item["categories"])), "feeds": [name]}
+                seen[key] = row
                 rows.append(row)
             else:
                 if name not in row["feeds"]:
@@ -205,6 +233,7 @@ def flatten(row):
     return {
         "title": row["title"],
         "link": row["link"],
+        "source": row["source"],
         "published": row["published"],
         "author": row["author"],
         "categories": " | ".join(row["categories"]),
@@ -248,7 +277,7 @@ def main():
         writer.writeheader()
         writer.writerows(flat)
 
-    preview_cols = ["title", "link", "published", "author", "categories", "feed_count"]
+    preview_cols = ["title", "link", "source", "published", "author", "categories", "feed_count"]
     with open(args.out / "articles.json", "w", encoding="utf-8") as f:
         json.dump([{k: r[k] for k in preview_cols} for r in flat], f, ensure_ascii=False)
 
