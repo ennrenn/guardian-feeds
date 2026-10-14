@@ -1,5 +1,6 @@
 # One feed URL per line. Blank lines and lines starting with # are ignored.
 # Replace the example below with your full list of Guardian feeds.
+https://www.fenews.co.uk/feed
 https://www.theguardian.com/australia-news/australian-education/rss
 https://www.theguardian.com/education/academicexperts/rss
 https://www.theguardian.com/education/academics/rss
