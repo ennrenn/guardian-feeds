@@ -1,6 +1,6 @@
 # Guardian feeds to CSV
 
-This repository fetches a list of RSS feeds (mainly the Guardian's, plus any other site you add), merges the articles into one CSV, and publishes the CSV on a GitHub Pages site. A GitHub Action does the fetching, so the work happens on GitHub's servers when you press a button.
+This repository fetches a list of RSS feeds (mainly the Guardian's, plus any other site you add), merges the articles into one CSV, and publishes the CSV on a GitHub Pages site. A GitHub Action does the fetching, so the work happens on GitHub's servers when you press a button..
 
 ## Setting it up
 
