@@ -59,11 +59,11 @@
     <ul id="faillist"></ul>
   </details>
 
-  <input type="search" id="filter" placeholder="Filter by title, author or category" aria-label="Filter articles">
+  <input type="search" id="filter" placeholder="Filter by title, source, author or category" aria-label="Filter articles">
   <p id="shown" class="muted"></p>
   <div class="tablewrap">
     <table>
-      <thead><tr><th>Published</th><th>Title</th><th>Author</th><th>Categories</th></tr></thead>
+      <thead><tr><th>Published</th><th>Title</th><th>Source</th><th>Author</th><th>Categories</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </div>
@@ -101,6 +101,7 @@ function render(articles, term) {
     } else {
       titleCell.textContent = a.title;
     }
+    addCell(tr, a.source);
     addCell(tr, a.author);
     addCell(tr, a.categories.split(" | ").slice(0, 4).join(", "));
     body.appendChild(tr);
@@ -135,7 +136,7 @@ async function load() {
     $("failures").hidden = false;
   }
 
-  for (const a of articles) a._hay = `${a.title} ${a.author} ${a.categories}`.toLowerCase();
+  for (const a of articles) a._hay = `${a.title} ${a.source} ${a.author} ${a.categories}`.toLowerCase();
   render(articles, "");
   $("filter").addEventListener("input", (e) => render(articles, e.target.value));
 }
