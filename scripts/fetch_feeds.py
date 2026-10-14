@@ -21,7 +21,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -32,6 +32,15 @@ TIMEOUT = 30          # seconds per request
 ATTEMPTS = 3          # tries per feed before giving up
 WORKERS = 2           # feeds fetched at once; kept low so the Guardian does not rate-limit us
 INCLUDE_DESCRIPTION = True   # set to False to leave article summaries out
+
+# Date filter. Articles published before the cut-off are left out of the CSV.
+# MAX_AGE_DAYS is a rolling window that moves with the day you run the script.
+# With 5, a run on 14 October keeps everything from 9 October (00:00 UTC) onwards.
+# Use None to switch it off.
+MAX_AGE_DAYS = 5
+# START_DATE is a fixed day (YYYY-MM-DD) that never moves, for example "2026-10-01".
+# Leave it as "" to use only the rolling window. If both are set, the later cut-off applies.
+START_DATE = ""
 
 NS = {
     "dc": "http://purl.org/dc/elements/1.1/",
@@ -201,10 +210,11 @@ def feed_name(url):
     return f"{host}/{path}" if path else host
 
 
-def merge(results):
-    """Combine items from all feeds into one row per article."""
+def merge(results, cutoff=""):
+    """Combine items from all feeds into one row per article.
+    Items published before the cut-off are counted but left out; items with no date are kept."""
     rows, seen = [], {}
-    total = 0
+    total = old = 0
     for result in results:
         if result["error"]:
             continue
@@ -212,6 +222,9 @@ def merge(results):
         source = host_of(result["url"])
         for item in result["items"]:
             total += 1
+            if cutoff and item["published"] and item["published"] < cutoff:
+                old += 1
+                continue
             key = item["link"] or item["guid"]  # the link is the same wherever the article appears
             row = seen.get(key)
             if row is None:
@@ -226,7 +239,23 @@ def merge(results):
                     if cat not in row["categories"]:
                         row["categories"].append(cat)
     rows.sort(key=lambda r: r["published"], reverse=True)
-    return rows, total
+    return rows, total, old
+
+
+def cutoff_from(start_date, max_age_days):
+    """Earliest publication time to keep, as an ISO string, or '' for no limit."""
+    limits = []
+    if start_date:
+        try:
+            limits.append(datetime.strptime(start_date, "%Y-%m-%d").strftime("%Y-%m-%dT00:00:00Z"))
+        except ValueError:
+            sys.exit(f'The start date must look like 2026-10-01, not "{start_date}".')
+    if max_age_days:
+        # Count back whole days from today's midnight (UTC), so the window does not
+        # shift by the hour: every run on the same day gives the same cut-off.
+        today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        limits.append((today - timedelta(days=int(max_age_days))).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    return max(limits) if limits else ""
 
 
 def flatten(row):
@@ -249,7 +278,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--feeds", type=Path, default=ROOT / "feeds.txt", help="file listing feed URLs")
     parser.add_argument("--out", type=Path, default=ROOT / "site", help="output folder")
+    parser.add_argument("--from-date", default=START_DATE, metavar="YYYY-MM-DD",
+                        help="leave out articles published before this day (default: START_DATE in the script)")
+    parser.add_argument("--max-age-days", type=int, default=MAX_AGE_DAYS, metavar="N",
+                        help="leave out articles older than N days (default: MAX_AGE_DAYS in the script)")
     args = parser.parse_args()
+    cutoff = cutoff_from(args.from_date, args.max_age_days)
 
     urls = read_feeds(args.feeds)
     if not urls:
@@ -267,7 +301,7 @@ def main():
             results[i] = process(urls[i])
             time.sleep(3)
 
-    rows, total = merge(results)
+    rows, total, old = merge(results, cutoff)
     flat = [flatten(r) for r in rows]
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -289,6 +323,8 @@ def main():
         "feeds_ok": len(urls) - len(failures),
         "items_total": total,
         "items_unique": len(rows),
+        "date_from": cutoff[:10],
+        "items_older_left_out": old,
         "failures": failures,
         "feeds": [{"url": r["url"], "title": r["title"], "items": len(r["items"]), "error": r["error"]}
                   for r in results],
@@ -297,7 +333,11 @@ def main():
         json.dump(status, f, ensure_ascii=False, indent=2)
 
     print(f"{status['feeds_ok']} of {status['feeds_total']} feeds fetched; "
-          f"{status['items_unique']} unique articles ({total} before merging duplicates).")
+          f"{status['items_unique']} unique articles ({total} items fetched before merging duplicates).")
+    if cutoff:
+        print(f"Date filter: kept articles from {cutoff[:10]} onwards; {old} older item(s) left out.")
+        if not rows:
+            print("  Warning: no articles are newer than the cut-off, so the CSV is empty.")
     for fail in failures:
         print(f"  FAILED {fail['url']}: {fail['error']}")
     print(f"CSV saved to: {(args.out / 'guardian_feeds.csv').resolve()}")
