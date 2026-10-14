@@ -117,9 +117,12 @@ async function load() {
     fetch("articles.json").then((r) => r.json()),
   ]);
 
+  const day = new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeZone: "UTC" });
+  const since = status.date_from ? ` from ${day.format(new Date(status.date_from + "T00:00:00Z"))} onwards` : "";
+  const left = status.items_older_left_out ? `, with ${status.items_older_left_out} older items left out` : "";
   $("summary").textContent =
-    `${status.feeds_ok} of ${status.feeds_total} feeds fetched, giving ${status.items_unique} articles ` +
-    `(${status.items_total} before duplicates were merged). Last run ${fmt.format(new Date(status.generated_at))}.`;
+    `${status.feeds_ok} of ${status.feeds_total} feeds fetched, giving ${status.items_unique} articles${since} ` +
+    `(${status.items_total} items fetched before duplicates were merged${left}). Last run ${fmt.format(new Date(status.generated_at))}.`;
 
   if (status.repo) {
     $("run").href = `https://github.com/${status.repo}/actions/workflows/fetch-feeds.yml`;
