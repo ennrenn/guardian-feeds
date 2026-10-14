@@ -130,6 +130,33 @@ def tidy_description(raw_html):
     return text.strip()
 
 
+def clean_category(text):
+    """Tidy one category label. The Telegraph's internal tags ('structure:business',
+    'storytype:standard') are dropped, and its topics ('topics:things/uk-economy')
+    become plain words ('uk economy'). Other labels are left as they are."""
+    text = text.strip()
+    prefix, colon, rest = text.partition(":")
+    if colon and prefix in ("structure", "storytype"):
+        return ""
+    if colon and prefix == "topics":
+        return rest.rsplit("/", 1)[-1].replace("-", " ").strip()
+    return text
+
+
+def author_of(item):
+    """Names from <dc:creator> (one or more), else from <author>.
+    An <author> that holds only an email address is ignored; 'a@b.com (Name)' gives 'Name'."""
+    names = [e.text.strip() for e in item.findall("dc:creator", NS) if e.text and e.text.strip()]
+    if not names:
+        raw = child_text(item, "author")
+        match = re.match(r"^\S+@\S+\s*\((.+)\)$", raw)
+        if match:
+            names = [match.group(1).strip()]
+        elif raw and "@" not in raw:
+            names = [raw]
+    return "; ".join(names)
+
+
 def best_image(item, summary_html=""):
     """Pick the widest media:content or media:thumbnail image, else an enclosure,
     else the first picture inside the summary (WordPress sites put it there)."""
@@ -170,8 +197,10 @@ def parse_feed(data):
             "link": link,
             "guid": guid or link,
             "published": to_iso(child_text(node, "pubDate")) or to_iso(child_text(node, "dc:date")),
-            "author": "; ".join(e.text.strip() for e in node.findall("dc:creator", NS) if e.text),
-            "categories": [e.text.strip() for e in node.findall("category") if e.text],
+            "author": author_of(node),
+            # Category labels, plus the Express's comma-separated <media:keywords> tags.
+            "categories": [c for c in (clean_category(e.text) for e in node.findall("category") if e.text) if c]
+                          + [k.strip() for k in child_text(node, "media:keywords").split(",") if k.strip()],
             "description": tidy_description(child_text(node, "description")),
             "image_url": best_image(node, child_text(node, "description")),
         })
@@ -199,10 +228,10 @@ def feed_name(url):
     """Short label for a feed. Guardian feeds show just the path, e.g.
     'education/higher-education'; other sites show the domain first, e.g. 'fenews.co.uk'."""
     path = urlparse(url).path.strip("/")
-    for tail in ("/rss", "/feed"):
+    for tail in ("/rss.xml", "/rss", "/feed"):
         if path.endswith(tail):
             path = path[: -len(tail)]
-    if path in ("rss", "feed"):
+    if path in ("rss.xml", "rss", "feed"):
         path = ""
     host = host_of(url)
     if not host or host == "theguardian.com":
