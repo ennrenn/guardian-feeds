@@ -1,6 +1,6 @@
 # Guardian feeds to CSV
 
-This repository fetches a list of RSS feeds (mainly the Guardian's, plus any other site you add), merges the articles into one CSV, and publishes the CSV on a GitHub Pages site. A GitHub Action does the fetching, so the work happens on GitHub's servers when you press a button..
+This repository fetches a list of RSS feeds (mainly the Guardian's, plus any other site you add), merges the articles into one CSV, and publishes the CSV on a GitHub Pages site. A GitHub Action does the fetching, so the work happens on GitHub's servers when you press a button.
 
 ## Setting it up
 
@@ -20,7 +20,7 @@ python scripts/fetch_feeds.py
 
 The CSV appears in the `site` folder, as `site/guardian_feeds.csv`, and the last line the script prints gives the full path. This is also the fallback if GitHub's servers are ever refused by the Guardian but your own connection is not.
 
-The Guardian sometimes answers "HTTP 429", which means too many requests. The script fetches two feeds at a time, waits as long as the Guardian asks, and tries any rate-limited feeds again after a 30 second pause.
+The Guardian sometimes answers "HTTP 429", which means too many requests, and other sites sometimes answer "HTTP 403", which means the site has refused the request (busy sites do this to servers like GitHub's for a while). The script fetches two feeds at a time, waits as long as the site asks, and tries any refused or rate-limited feeds again, one at a time, after a 30 second pause. If a site keeps refusing GitHub, running the script on your own computer is the fallback.
 
 ## Adding a feed from another site
 
@@ -38,7 +38,15 @@ Near the top of `scripts/fetch_feeds.py` there are two settings. `MAX_AGE_DAYS =
 
 There is one row per article. The same article often appears in several feeds, so it is merged into one row, with `source_feeds` listing every feed it appeared in and `feed_count` giving the number. The columns are title, link, source (the website, such as theguardian.com or fenews.co.uk), published (UTC), author, categories, description (plain text), image_url, source_feeds, feed_count and guid. Rows are sorted newest first. The file is saved so Excel shows accents and symbols correctly.
 
-Each feed only holds its most recent items (about 20 for the Guardian, 50 for FE News, 10 for the Express and 120 for the Telegraph, going by the samples), so every run gives a snapshot of what is in the feeds at that moment. It does not build up a history. For busy feeds that is a few days, so an article from early in the month may already be gone from the feed by the time you run it. The date filter only removes articles; it cannot bring back ones a feed has dropped.
+Each feed only holds its most recent items (about 20 for the Guardian, 50 for FE News, 10 for the Express and 120 for the Telegraph, going by the samples). A busy feed turns over in a day or two, so an article can be gone from its feed by the next morning.
+
+## How articles are kept between runs
+
+To stop articles disappearing, each run saves its CSV in the repository as `data/guardian_feeds.csv`, and the next run starts from that saved copy. It adds whatever the feeds hold today, updates any article whose headline or summary has changed, and drops anything older than the date window. The result is that an article stays in the CSV for the whole window (five days by default) even after its feed has moved on, and a feed that fails one morning does not lose the articles it supplied earlier. The site's summary line says how many articles were kept from earlier runs.
+
+The `source_feeds` and `feed_count` columns add up across runs, so an article that appeared in one feed on Monday and another on Tuesday lists both. The saved copy is an ordinary CSV, so you can open it in GitHub. To seed it with a CSV you already have, upload that file to `data/guardian_feeds.csv` before running the workflow. To start again from nothing, delete that file. To switch the feature off, set `KEEP_HISTORY = False` near the top of the script.
+
+The workflow needs permission to save the file. If a run fails at the step "Save the CSV in the repository", open Settings, then Actions, then General, and check that workflow permissions are not set to read-only, and that no branch protection rule is blocking the push.
 
 ## Things to know
 
