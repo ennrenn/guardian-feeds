@@ -6,6 +6,12 @@ Writes three files to the output folder (default: site/):
   articles.json       the same rows without descriptions, for the preview page
   status.json         what happened to each feed, for the status panel
 
+It also keeps a saved copy of the CSV (default: data/guardian_feeds.csv). Each run
+starts from that copy, adds what the feeds hold today, and drops anything older than
+the date window. So an article stays in the CSV for the whole window even after the
+feed it came from has moved on, and a feed that fails one morning does not lose the
+articles it supplied earlier.
+
 Uses only the Python standard library, so there is nothing to install.
 """
 
@@ -32,6 +38,8 @@ TIMEOUT = 30          # seconds per request
 ATTEMPTS = 3          # tries per feed before giving up
 WORKERS = 2           # feeds fetched at once; kept low so the Guardian does not rate-limit us
 INCLUDE_DESCRIPTION = True   # set to False to leave article summaries out
+KEEP_HISTORY = True          # set to False to start from nothing on every run
+ARCHIVE = ROOT / "data" / "guardian_feeds.csv"   # the saved copy that each run builds on
 
 # Date filter. Articles published before the cut-off are left out of the CSV.
 # MAX_AGE_DAYS is a rolling window that moves with the day you run the script.
@@ -69,7 +77,10 @@ def fetch(url):
     for attempt in range(1, ATTEMPTS + 1):
         wait = 2 * attempt  # seconds to pause before the next try
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            req = urllib.request.Request(url, headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.5",
+            })
             with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
                 return resp.read(), None
         except urllib.error.HTTPError as e:
@@ -239,11 +250,47 @@ def feed_name(url):
     return f"{host}/{path}" if path else host
 
 
-def merge(results, cutoff=""):
+def load_archive(path):
+    """Rows saved by earlier runs, in the shape merge() works with. Empty if there are none."""
+    if not path or not path.exists():
+        return []
+    rows = []
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            for r in csv.DictReader(f):
+                if not (r.get("link") or r.get("guid")):
+                    continue
+                rows.append({
+                    "title": r.get("title", ""), "link": r.get("link", ""),
+                    "guid": r.get("guid") or r.get("link", ""), "source": r.get("source", ""),
+                    "published": r.get("published", ""), "author": r.get("author", ""),
+                    "categories": [c for c in r.get("categories", "").split(" | ") if c],
+                    "description": r.get("description", ""), "image_url": r.get("image_url", ""),
+                    "feeds": [x for x in r.get("source_feeds", "").split(" | ") if x],
+                })
+    except (OSError, csv.Error, UnicodeDecodeError) as e:
+        print(f"Warning: could not read the saved copy {path} ({e}), so this run starts without it.")
+        return []
+    return rows
+
+
+def merge(results, cutoff="", previous=()):
     """Combine items from all feeds into one row per article.
-    Items published before the cut-off are counted but left out; items with no date are kept."""
+    Rows saved by earlier runs (previous) are the starting point. Items published before
+    the cut-off are counted but left out; items with no date are kept.
+    Returns (rows, items fetched, older items left out, rows carried over from earlier runs)."""
     rows, seen = [], {}
     total = old = 0
+    for r in previous:
+        if cutoff and r["published"] and r["published"] < cutoff:
+            continue
+        key = r["link"] or r["guid"]
+        if key in seen:
+            continue
+        row = {**r, "categories": list(dict.fromkeys(r["categories"])),
+               "feeds": list(dict.fromkeys(r["feeds"])), "fresh": False}
+        seen[key] = row
+        rows.append(row)
     for result in results:
         if result["error"]:
             continue
@@ -257,18 +304,23 @@ def merge(results, cutoff=""):
             key = item["link"] or item["guid"]  # the link is the same wherever the article appears
             row = seen.get(key)
             if row is None:
-                row = {**item, "source": source,
+                row = {**item, "source": source, "fresh": True,
                        "categories": list(dict.fromkeys(item["categories"])), "feeds": [name]}
                 seen[key] = row
                 rows.append(row)
             else:
+                row["fresh"] = True
+                for field in ("title", "description", "image_url", "author"):
+                    if item[field]:
+                        row[field] = item[field]  # today's wording wins over the saved copy
                 if name not in row["feeds"]:
                     row["feeds"].append(name)
                 for cat in item["categories"]:
                     if cat not in row["categories"]:
                         row["categories"].append(cat)
     rows.sort(key=lambda r: r["published"], reverse=True)
-    return rows, total, old
+    carried = sum(1 for r in rows if not r["fresh"])
+    return rows, total, old, carried
 
 
 def cutoff_from(start_date, max_age_days):
@@ -311,7 +363,12 @@ def main():
                         help="leave out articles published before this day (default: START_DATE in the script)")
     parser.add_argument("--max-age-days", type=int, default=MAX_AGE_DAYS, metavar="N",
                         help="leave out articles older than N days (default: MAX_AGE_DAYS in the script)")
+    parser.add_argument("--archive", type=Path, default=ARCHIVE if KEEP_HISTORY else None, metavar="FILE",
+                        help="saved copy of the CSV that each run builds on (default: data/guardian_feeds.csv)")
+    parser.add_argument("--no-history", action="store_true", help="ignore and do not update the saved copy")
     args = parser.parse_args()
+    if args.no_history:
+        args.archive = None
     cutoff = cutoff_from(args.from_date, args.max_age_days)
 
     urls = read_feeds(args.feeds)
@@ -321,16 +378,24 @@ def main():
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         results = list(pool.map(process, urls))
 
-    # Feeds that were rate-limited get one more go, one at a time, after a pause.
-    limited = [i for i, r in enumerate(results) if r["error"] == "HTTP 429"]
+    # Feeds that were rate-limited (429) or refused (403, which busy sites sometimes
+    # send to servers like GitHub's for a while) get one more go, one at a time, after a pause.
+    limited = [i for i, r in enumerate(results) if r["error"] in ("HTTP 429", "HTTP 403")]
     if limited:
-        print(f"{len(limited)} feed(s) were rate-limited; waiting 30 seconds, then trying again.")
+        print(f"{len(limited)} feed(s) were refused or rate-limited; waiting 30 seconds, then trying them again.")
         time.sleep(30)
         for i in limited:
             results[i] = process(urls[i])
             time.sleep(3)
 
-    rows, total, old = merge(results, cutoff)
+    failures = [{"url": r["url"], "error": r["error"]} for r in results if r["error"]]
+    if len(failures) == len(urls):
+        for fail in failures:
+            print(f"  FAILED {fail['url']}: {fail['error']}")
+        sys.exit("No feeds could be fetched, so nothing has been changed.")
+
+    previous = load_archive(args.archive)
+    rows, total, old, carried = merge(results, cutoff, previous)
     flat = [flatten(r) for r in rows]
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -339,12 +404,17 @@ def main():
         writer = csv.DictWriter(f, fieldnames=COLUMNS)
         writer.writeheader()
         writer.writerows(flat)
+    if args.archive:
+        args.archive.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.archive, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.DictWriter(f, fieldnames=COLUMNS)
+            writer.writeheader()
+            writer.writerows(flat)
 
     preview_cols = ["title", "link", "source", "published", "author", "categories", "feed_count"]
     with open(args.out / "articles.json", "w", encoding="utf-8") as f:
         json.dump([{k: r[k] for k in preview_cols} for r in flat], f, ensure_ascii=False)
 
-    failures = [{"url": r["url"], "error": r["error"]} for r in results if r["error"]]
     status = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "repo": os.environ.get("GITHUB_REPOSITORY", ""),
@@ -354,6 +424,7 @@ def main():
         "items_unique": len(rows),
         "date_from": cutoff[:10],
         "items_older_left_out": old,
+        "items_carried_over": carried,
         "failures": failures,
         "feeds": [{"url": r["url"], "title": r["title"], "items": len(r["items"]), "error": r["error"]}
                   for r in results],
@@ -363,6 +434,8 @@ def main():
 
     print(f"{status['feeds_ok']} of {status['feeds_total']} feeds fetched; "
           f"{status['items_unique']} unique articles ({total} items fetched before merging duplicates).")
+    if args.archive:
+        print(f"History: {carried} article(s) kept from earlier runs that today's feeds no longer hold.")
     if cutoff:
         print(f"Date filter: kept articles from {cutoff[:10]} onwards; {old} older item(s) left out.")
         if not rows:
@@ -370,9 +443,6 @@ def main():
     for fail in failures:
         print(f"  FAILED {fail['url']}: {fail['error']}")
     print(f"CSV saved to: {(args.out / 'guardian_feeds.csv').resolve()}")
-
-    if status["feeds_ok"] == 0:
-        sys.exit("No feeds could be fetched, so nothing will be published.")
 
 
 if __name__ == "__main__":
