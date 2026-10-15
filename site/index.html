@@ -119,7 +119,8 @@ async function load() {
 
   const day = new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeZone: "UTC" });
   const since = status.date_from ? ` from ${day.format(new Date(status.date_from + "T00:00:00Z"))} onwards` : "";
-  const left = status.items_older_left_out ? `, with ${status.items_older_left_out} older items left out` : "";
+  const left = (status.items_older_left_out ? `, with ${status.items_older_left_out} older items left out` : "") +
+    (status.items_carried_over ? `, and ${status.items_carried_over} articles kept from earlier runs` : "");
   $("summary").textContent =
     `${status.feeds_ok} of ${status.feeds_total} feeds fetched, giving ${status.items_unique} articles${since} ` +
     `(${status.items_total} items fetched before duplicates were merged${left}). Last run ${fmt.format(new Date(status.generated_at))}.`;
