@@ -1,12 +1,9 @@
 name: Fetch feeds
 
 on:
-  # The "Run workflow" button on the Actions tab.
   workflow_dispatch:
-  # To refresh automatically as well, remove the # from the next two lines.
-  # The time is UTC. This example runs every day at 05:17.
-  # schedule:
-  #   - cron: "17 5 * * *"
+  schedule:
+    - cron: "17 */3 * * *"
 
 permissions:
   contents: write   # lets the run save the CSV back into the repository
