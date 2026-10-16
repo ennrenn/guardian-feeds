@@ -3,7 +3,7 @@ name: Fetch feeds
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "17 */1 * * *"
 
 permissions:
   contents: write
