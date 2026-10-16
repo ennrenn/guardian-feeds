@@ -6,7 +6,7 @@ on:
     - cron: "17 */6 * * *"
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -30,6 +30,25 @@ jobs:
       - name: Fetch feeds and build CSV
         run: python scripts/fetch_feeds.py
 
+      - name: Save the CSV in the repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/guardian_feeds.csv
+          if git diff --cached --quiet; then
+            echo "No change to save."
+          else
+            git commit -m "Update feeds data"
+            git pull --rebase
+            git push
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: feeds-csv
+          path: site/guardian_feeds.csv
+          retention-days: 14
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
@@ -38,3 +57,5 @@ jobs:
 
       - id: deploy
         uses: actions/deploy-pages@v4
+        with:
+          timeout: 180000
